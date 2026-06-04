@@ -49,8 +49,15 @@ def generate_m_sequence(register_state, taps, length=None):
     if length <= 0:
         raise ValueError('length must be positive')
 
-    # TODO: clock the LFSR and map output bits to bipolar chips.
-    raise NotImplementedError('请实现 m 序列生成')
+    chips = np.empty(length, dtype=int)
+    shift_state = state.copy()
+    tap_indices = [tap - 1 for tap in taps]
+    for index in range(length):
+        output_bit = shift_state[-1]
+        chips[index] = 1 if output_bit == 0 else -1
+        feedback = int(np.bitwise_xor.reduce(shift_state[tap_indices]))
+        shift_state = np.concatenate(([feedback], shift_state[:-1]))
+    return chips
 
 
 def dsss_spread(bits, pn_chips):
@@ -65,8 +72,8 @@ def dsss_spread(bits, pn_chips):
     if bits.ndim != 1 or not np.all((bits == 0) | (bits == 1)):
         raise ValueError('bits must be a one-dimensional binary array')
 
-    # TODO: BPSK-map each bit and multiply by the PN chips.
-    raise NotImplementedError('请实现 DSSS 扩频')
+    symbols = bpsk_modulate(bits)
+    return (symbols[:, np.newaxis] * pn_chips[np.newaxis, :]).reshape(-1)
 
 
 def dsss_despread(received_chips, pn_chips):
@@ -81,8 +88,9 @@ def dsss_despread(received_chips, pn_chips):
     if received_chips.ndim != 1 or len(received_chips) % len(pn_chips) != 0:
         raise ValueError('received_chips length must be a multiple of PN length')
 
-    # TODO: reshape by spreading factor, correlate with PN chips, and decide bits.
-    raise NotImplementedError('请实现 DSSS 解扩')
+    matrix = received_chips.reshape(-1, len(pn_chips))
+    correlations = matrix @ pn_chips
+    return (correlations < 0).astype(int)
 
 
 def processing_gain_db(spreading_factor):
@@ -90,8 +98,7 @@ def processing_gain_db(spreading_factor):
     if spreading_factor <= 0:
         raise ValueError('spreading_factor must be positive')
 
-    # TODO: compute 10 * log10(N).
-    raise NotImplementedError('请实现处理增益计算')
+    return float(10 * np.log10(spreading_factor))
 
 
 def despread_with_timing_offset(received_chips, pn_chips, max_offset):
@@ -99,8 +106,29 @@ def despread_with_timing_offset(received_chips, pn_chips, max_offset):
     if max_offset < 0:
         raise ValueError('max_offset must be non-negative')
 
-    # TODO: 选做：请实现同步偏移搜索解扩。
-    raise NotImplementedError('选做：请实现同步偏移搜索')
+    received_chips = np.asarray(received_chips, dtype=float)
+    pn_chips = _validate_pn_chips(pn_chips)
+    best_offset = 0
+    best_score = -np.inf
+    best_bits = None
+
+    for offset in range(max_offset + 1):
+        usable = received_chips[offset:]
+        usable_length = (len(usable) // len(pn_chips)) * len(pn_chips)
+        if usable_length == 0:
+            continue
+        aligned = usable[:usable_length]
+        matrix = aligned.reshape(-1, len(pn_chips))
+        correlations = matrix @ pn_chips
+        score = float(np.mean(np.abs(correlations)))
+        if score > best_score:
+            best_score = score
+            best_offset = offset
+            best_bits = (correlations < 0).astype(int)
+
+    if best_bits is None:
+        raise ValueError('received_chips is too short for the requested PN length')
+    return best_bits, best_offset
 
 
 def _correlation_values(received_chips, pn_chips):
@@ -111,7 +139,7 @@ def _correlation_values(received_chips, pn_chips):
 def run_spread_spectrum_demo():
     """Run Part 2 demo and generate figures."""
     print('=' * 60)
-    print('Part 2: DSSS 扩频通信实验')
+    print('Part 2: DSSS spread spectrum experiment')
     print('=' * 60)
     snr_db_values = np.array([-6, -3, 0, 3, 6, 9], dtype=float)
 
@@ -136,7 +164,7 @@ def run_spread_spectrum_demo():
         plot_ber_curve(
             snr_db_values,
             {'未扩频': unspread_ber, f'DSSS(N={len(pn_chips)})': dsss_ber},
-            '窄带干扰下 DSSS 扩频前后 BER 对比',
+            'DSSS BER comparison with narrowband interference',
             'dsss_ber_curve.png',
         )
 
@@ -147,13 +175,11 @@ def run_spread_spectrum_demo():
         correlations = _correlation_values(demo_rx, pn_chips)
         plot_correlation_snapshot(correlations, 'dsss_correlation_snapshot.png')
 
-        print(f'[OK] 处理增益: {processing_gain_db(len(pn_chips)):.2f} dB')
-        print('[OK] 已生成 results/dsss_ber_curve.png')
-        print('[OK] 已生成 results/dsss_correlation_snapshot.png')
-    except NotImplementedError as error:
-        print(f'[WAIT] 尚未完成核心函数: {error}')
+        print(f'[OK] processing gain: {processing_gain_db(len(pn_chips)):.2f} dB')
+        print('[OK] results/dsss_ber_curve.png generated')
+        print('[OK] results/dsss_correlation_snapshot.png generated')
     except Exception as error:
-        print(f'[FAIL] Part 2 运行失败: {error}')
+        print(f'[FAIL] Part 2 failed: {error}')
 
 
 if __name__ == '__main__':

@@ -18,6 +18,9 @@ from utils import (
 )
 
 
+SINGLE_BRANCH_LABEL = '单分支'
+
+
 def _validate_branch_arrays(received, channel):
     received = np.asarray(received, dtype=complex)
     channel = np.asarray(channel, dtype=complex)
@@ -49,8 +52,9 @@ def selection_combining(received, channel):
     """
     received, channel = _validate_branch_arrays(received, channel)
 
-    # TODO: choose the strongest branch per symbol and equalize by h.
-    raise NotImplementedError('请实现选择合并 SC')
+    strongest = np.argmax(np.abs(channel) ** 2, axis=0)
+    symbol_index = np.arange(received.shape[1])
+    return received[strongest, symbol_index] / channel[strongest, symbol_index]
 
 
 def maximal_ratio_combining(received, channel):
@@ -62,8 +66,9 @@ def maximal_ratio_combining(received, channel):
     """
     received, channel = _validate_branch_arrays(received, channel)
 
-    # TODO: use conjugate channel weights and normalize by total branch power.
-    raise NotImplementedError('请实现最大比合并 MRC')
+    numerator = np.sum(np.conj(channel) * received, axis=0)
+    denominator = np.sum(np.abs(channel) ** 2, axis=0)
+    return numerator / denominator
 
 
 def simulate_diversity_ber(snr_db_values, num_bits=4000, num_branches=2, seed=2026):
@@ -79,43 +84,69 @@ def simulate_diversity_ber(snr_db_values, num_bits=4000, num_branches=2, seed=20
     if num_bits <= 0 or num_branches < 2:
         raise ValueError('num_bits must be positive and num_branches must be at least 2')
 
-    # TODO: generate BPSK bits, simulate Rayleigh branches at each SNR,
-    # compare single-branch equalization, SC and MRC BER.
-    raise NotImplementedError('请实现分集 BER 仿真')
+    bits = generate_bits(num_bits, seed=seed)
+    symbols = bpsk_modulate(bits)
+    ber_curves = {SINGLE_BRANCH_LABEL: [], 'SC': [], 'MRC': []}
+
+    for index, snr_db in enumerate(snr_db_values):
+        received, channel = rayleigh_fading_branches(
+            symbols,
+            num_branches,
+            snr_db=float(snr_db),
+            seed=seed + index + 1,
+        )
+        single_branch = received[0] / channel[0]
+        sc_output = selection_combining(received, channel)
+        mrc_output = maximal_ratio_combining(received, channel)
+
+        ber_curves[SINGLE_BRANCH_LABEL].append(
+            calculate_ber(bits, bpsk_demodulate(single_branch))
+        )
+        ber_curves['SC'].append(calculate_ber(bits, bpsk_demodulate(sc_output)))
+        ber_curves['MRC'].append(calculate_ber(bits, bpsk_demodulate(mrc_output)))
+
+    return ber_curves
 
 
 def equal_gain_combining(received, channel):
     """Optional: equal-gain combining with phase-only correction."""
     received, channel = _validate_branch_arrays(received, channel)
 
-    # TODO: 选做：请实现等增益合并 EGC。
-    raise NotImplementedError('选做：请实现等增益合并 EGC')
+    phase_corrected = received * np.exp(-1j * np.angle(channel))
+    return np.sum(phase_corrected, axis=0) / np.sum(np.abs(channel), axis=0)
 
 
 def run_diversity_demo():
     """Run Part 1 demo and generate figures."""
     print('=' * 60)
-    print('Part 1: 分集合并实验')
+    print('Part 1: diversity combining experiment')
     print('=' * 60)
     snr_db_values = np.array([0, 3, 6, 9, 12, 15], dtype=float)
 
     try:
-        ber_curves = simulate_diversity_ber(snr_db_values, num_bits=6000, num_branches=2, seed=2026)
-        plot_ber_curve(snr_db_values, ber_curves, '瑞利衰落信道下分集合并 BER 对比', 'diversity_ber_curve.png')
+        ber_curves = simulate_diversity_ber(
+            snr_db_values, num_bits=6000, num_branches=2, seed=2026
+        )
+        plot_ber_curve(
+            snr_db_values,
+            ber_curves,
+            'Rayleigh fading diversity combining BER comparison',
+            'diversity_ber_curve.png',
+        )
 
         bits = generate_bits(120, seed=7)
         symbols = bpsk_modulate(bits)
         received, channel = rayleigh_fading_branches(symbols, 2, snr_db=8, seed=17)
         branch_equalized = received[0] / channel[0]
         mrc_output = maximal_ratio_combining(received, channel)
-        plot_diversity_snapshot(symbols, branch_equalized, mrc_output, 'diversity_waveform_snapshot.png')
+        plot_diversity_snapshot(
+            symbols, branch_equalized, mrc_output, 'diversity_waveform_snapshot.png'
+        )
 
-        print('[OK] 已生成 results/diversity_ber_curve.png')
-        print('[OK] 已生成 results/diversity_waveform_snapshot.png')
-    except NotImplementedError as error:
-        print(f'[WAIT] 尚未完成核心函数: {error}')
+        print('[OK] results/diversity_ber_curve.png generated')
+        print('[OK] results/diversity_waveform_snapshot.png generated')
     except Exception as error:
-        print(f'[FAIL] Part 1 运行失败: {error}')
+        print(f'[FAIL] Part 1 failed: {error}')
 
 
 if __name__ == '__main__':
